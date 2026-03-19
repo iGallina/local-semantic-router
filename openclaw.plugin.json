@@ -1,0 +1,25 @@
+{
+  "id": "local-semantic-router",
+  "name": "Local Semantic Router",
+  "description": "Routes prompts to the cheapest capable model using your own API keys — local-first, no third-party payments",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "configPath": {
+        "type": "string",
+        "description": "Path to config.yaml. Default: ~/.local-semantic-router/config.yaml"
+      },
+      "routing": {
+        "type": "object",
+        "description": "Override default routing configuration"
+      }
+    }
+  },
+  "uiHints": {
+    "configPath": {
+      "label": "Config Path",
+      "placeholder": "~/.local-semantic-router/config.yaml (default)"
+    }
+  }
+}

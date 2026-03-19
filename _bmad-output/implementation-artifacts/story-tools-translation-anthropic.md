@@ -2,7 +2,7 @@
 title: 'Tools Format Translation for Anthropic Provider'
 slug: 'tools-translation-anthropic'
 created: '2026-03-18'
-status: 'draft'
+status: 'review'
 story_id: 'LSR-002'
 parent_spec: 'tech-spec-local-semantic-router.md'
 epic: 'Anthropic Native Compatibility'
@@ -44,9 +44,9 @@ OpenClaw → proxy (lsr-auto) → Anthropic API
 
 ## Acceptance Criteria
 
-- [ ] When the target provider is `anthropic` (detected by `base_url` containing `api.anthropic.com`
+- [x] When the target provider is `anthropic` (detected by `base_url` containing `api.anthropic.com`
       OR by provider name), the proxy transforms the request tools array before forwarding.
-- [ ] OpenAI tool format → Anthropic native format:
+- [x] OpenAI tool format → Anthropic native format:
   ```
   // OpenAI (input)
   { type: "function", function: { name, description, parameters } }
@@ -54,19 +54,19 @@ OpenClaw → proxy (lsr-auto) → Anthropic API
   // Anthropic (output)
   { type: "custom", name, description, input_schema: parameters }
   ```
-- [ ] `tool_choice` is also translated:
+- [x] `tool_choice` is also translated:
   ```
   // OpenAI
   { type: "function", function: { name } }  →  { type: "tool", name }
   "auto"                                    →  { type: "auto" }
   "none"                                    →  { type: "none" }  (or omit)
   ```
-- [ ] `tool_calls` in assistant messages (for multi-turn) are translated back from Anthropic
+- [x] `tool_calls` in assistant messages (for multi-turn) are translated back from Anthropic
       format to OpenAI format in the response.
-- [ ] Translation is **only applied** when the downstream provider is Anthropic — not for
+- [x] Translation is **only applied** when the downstream provider is Anthropic — not for
       Groq, OpenRouter, or other OpenAI-compatible endpoints.
-- [ ] Existing tests still pass.
-- [ ] New unit tests cover the translation function (both directions).
+- [x] Existing tests still pass.
+- [x] New unit tests cover the translation function (both directions).
 
 ---
 
@@ -193,9 +193,35 @@ describe("translateToolChoiceToAnthropic", () => {
 
 ## Definition of Done
 
-- [ ] `translateToolsToAnthropic` implemented and exported from `src/tools-translator.ts`
-- [ ] `dispatch.ts` applies translation when provider is Anthropic
-- [ ] Response translation handles `tool_use` → `tool_calls` (at minimum non-streaming)
-- [ ] Unit tests passing (`npm test`)
+- [x] `translateToolsToAnthropic` implemented and exported from `src/tools-translator.ts`
+- [x] `dispatch.ts` applies translation when provider is Anthropic
+- [x] Response translation handles `tool_use` → `tool_calls` (at minimum non-streaming)
+- [x] Unit tests passing (`npm test`)
 - [ ] Manual test: `local-semantic-router/lsr-auto` via OpenClaw without tool errors
 - [ ] Committed on `main`
+
+---
+
+## Dev Agent Record
+
+### Implementation Plan
+- Created `src/tools-translator.ts` with three pure translation functions
+- Integrated into `dispatchAnthropic()` in `src/dispatch.ts` — translation only applied for `anthropic-messages` API type
+- Added full Anthropic response → OpenAI response translation (non-streaming) including usage mapping and finish_reason translation
+
+### File List
+- `src/tools-translator.ts` — NEW: Tool format translation functions (OpenAI ↔ Anthropic)
+- `src/tools-translator.test.ts` — NEW: 13 unit tests for all translation functions
+- `src/dispatch.ts` — MODIFIED: Import translator, apply tool/tool_choice translation in dispatchAnthropic, add response translation
+- `src/dispatch.test.ts` — MODIFIED: 3 new integration tests (tool translation, response translation, non-Anthropic passthrough)
+- `_bmad-output/implementation-artifacts/story-tools-translation-anthropic.md` — MODIFIED: Status and checkboxes
+
+### Completion Notes
+- 58 tests pass (0 regressions, 16 new tests)
+- Translation is cleanly scoped: only `anthropic-messages` API type triggers it
+- Response translation maps `stop_reason: "tool_use"` → `finish_reason: "tool_calls"` and converts usage fields
+- Also handles `"required"` → `{ type: "any" }` tool_choice mapping (bonus coverage)
+- Streaming tool_use translation is out of scope per story spec
+
+### Change Log
+- 2026-03-18: Implemented LSR-002 — tools format translation for Anthropic provider

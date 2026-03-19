@@ -1,0 +1,65 @@
+# local-semantic-router configuration
+# Documentation: https://github.com/local-semantic-router/local-semantic-router
+#
+# API keys use ${ENV_VAR} interpolation — set them in your .env file
+# or export them in your shell environment.
+
+port: 8402
+bind: "127.0.0.1"
+routing_profile: auto
+
+# Provider configurations
+# Each provider needs an API type, base URL, API key, and model list.
+providers:
+  groq:
+    api: openai-completions
+    base_url: "https://api.groq.com/openai/v1"
+    api_key: "${GROQ_API_KEY}"
+    models:
+      - id: "llama-3.3-70b-versatile"
+        name: "Llama 3.3 70B"
+        input_price: 0.59
+        output_price: 0.79
+        context_window: 128000
+        max_tokens: 32768
+
+  anthropic:
+    api: anthropic-messages
+    base_url: "https://api.anthropic.com/v1"
+    api_key: "${ANTHROPIC_API_KEY}"
+    models:
+      - id: "claude-sonnet-4-6-20260315"
+        name: "Claude Sonnet 4.6"
+        input_price: 3.0
+        output_price: 15.0
+        context_window: 200000
+        max_tokens: 64000
+      - id: "claude-opus-4-6-20260315"
+        name: "Claude Opus 4.6"
+        input_price: 5.0
+        output_price: 25.0
+        context_window: 200000
+        max_tokens: 32000
+
+# Tier-to-model mappings
+# Format: "provider_name/model_id"
+tiers:
+  auto:
+    simple:
+      primary: "groq/llama-3.3-70b-versatile"
+    medium:
+      primary: "anthropic/claude-sonnet-4-6-20260315"
+    complex:
+      primary: "anthropic/claude-opus-4-6-20260315"
+    reasoning:
+      primary: "anthropic/claude-opus-4-6-20260315"
+
+# Fallback LLM classifier (disabled by default — SEC-3)
+# When disabled, ambiguous prompts default to MEDIUM tier.
+# When enabled, prompts may be forwarded to the classifier LLM for tier classification.
+fallback_classifier:
+  enabled: false
+  # provider: groq
+  # model: "llama-3.3-70b-versatile"
+  # max_tokens: 10
+  # temperature: 0
