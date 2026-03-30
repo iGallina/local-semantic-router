@@ -6,8 +6,9 @@ dist/
 node_modules/
 
 # Environment & secrets (SEC-1)
-*.env
-.env*
+.env
+.env.*
+!.env.example
 config.yaml
 config.yml
 
@@ -23,3 +24,18 @@ Thumbs.db
 
 # Test coverage
 coverage/
+
+# AI agent tooling
+.agent/
+.claude/
+.gemini/
+_bmad/
+_bmad-output/
+skills/
+CLAUDE.md
+
+# Development utilities
+restart.sh
+clawrouter-ref/
+tasks/
+docs/
