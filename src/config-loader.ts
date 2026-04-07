@@ -36,6 +36,7 @@ const KNOWN_TOP_LEVEL_FIELDS = new Set([
   "tiers",
   "fallback_classifier",
   "scoring",
+  "budget",
 ]);
 
 const KNOWN_PROVIDER_FIELDS = new Set(["api", "base_url", "api_key", "models"]);
