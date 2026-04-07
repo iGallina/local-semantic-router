@@ -15,6 +15,7 @@ import type { ProxyHandle } from "./proxy.js";
 import { loadConfig } from "./config-loader.js";
 import type { ResolvedConfig } from "./config-types.js";
 import type { OpenClawPluginApi, OpenClawPluginDefinition, PluginLogger } from "./openclaw-types.js";
+import { injectModelsConfig, injectAuthProfile } from "./openclaw-config.js";
 
 // Re-export for library usage
 export { localRouterProvider, setActiveProxy, getActiveProxy } from "./provider.js";
@@ -137,6 +138,20 @@ const plugin: OpenClawPluginDefinition = {
       if (!healthy) {
         log.warn(`Proxy health check did not pass within 3s`);
       }
+
+      // Inject LSR config into OpenClaw so models are immediately available
+      injectModelsConfig(proxy.port, log);
+      injectAuthProfile(log);
+
+      // Mutate runtime config for immediate availability without file reload
+      if (!api.config.models) api.config.models = { providers: {} };
+      if (!api.config.models.providers) api.config.models.providers = {};
+      api.config.models.providers["local-router"] = {
+        baseUrl: `http://127.0.0.1:${proxy.port}/v1`,
+        api: "openai-completions",
+        apiKey: "lsr-proxy-handles-auth",
+        models: localRouterProvider.models.models,
+      };
     } catch (error) {
       log.error(
         `Failed to start: ${error instanceof Error ? error.message : String(error)}`,
