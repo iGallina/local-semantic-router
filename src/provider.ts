@@ -66,9 +66,9 @@ function buildProviderModels(baseUrl: string): ModelProviderConfig {
     baseUrl: `${baseUrl}/v1`,
     api: "openai-completions",
     models: [
-      { id: "lsr-auto", name: "Auto (Smart Router - Balanced)", api: "openai-completions", contextWindow: 200000, maxTokens: 64000 },
-      { id: "lsr-eco", name: "Eco (Smart Router - Cost Optimized)", api: "openai-completions", contextWindow: 200000, maxTokens: 64000 },
-      { id: "lsr-premium", name: "Premium (Smart Router - Best Quality)", api: "openai-completions", contextWindow: 200000, maxTokens: 64000 },
+      { id: "lsr-auto", name: "Auto (Smart Router - Balanced)", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 64000 },
+      { id: "lsr-eco", name: "Eco (Smart Router - Cost Optimized)", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 64000 },
+      { id: "lsr-premium", name: "Premium (Smart Router - Best Quality)", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 64000 },
     ],
   };
 }

@@ -106,6 +106,7 @@ const DEGRADED_RESPONSE_PATTERNS = [
 // ─── Rate Limiting ───
 
 const rateLimitedModels = new Map<string, number>();
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 300_000; // 5 minutes
 
 function isRateLimited(modelId: string): boolean {
   const hitTime = rateLimitedModels.get(modelId);
@@ -121,6 +122,15 @@ function isRateLimited(modelId: string): boolean {
 function markRateLimited(modelId: string): void {
   rateLimitedModels.set(modelId, Date.now());
   console.log(`[local-semantic-router] Model ${modelId} rate-limited, will deprioritize for 60s`);
+}
+
+function purgeExpiredRateLimits(): void {
+  const now = Date.now();
+  for (const [model, hitTime] of rateLimitedModels) {
+    if (now - hitTime >= RATE_LIMIT_COOLDOWN_MS) {
+      rateLimitedModels.delete(model);
+    }
+  }
 }
 
 function prioritizeNonRateLimited(models: string[]): string[] {
@@ -822,6 +832,9 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     modelPricing,
   };
 
+  // Periodic cleanup of expired rate-limit entries
+  const rateLimitCleanup = setInterval(purgeExpiredRateLimits, RATE_LIMIT_CLEANUP_INTERVAL_MS);
+
   // Track active connections
   const connections = new Set<import("net").Socket>();
 
@@ -964,6 +977,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     baseUrl,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        clearInterval(rateLimitCleanup);
         const timeout = setTimeout(() => {
           reject(new Error("[local-semantic-router] Close timeout after 4s"));
         }, 4000);

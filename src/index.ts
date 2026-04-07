@@ -11,6 +11,7 @@
 
 import { localRouterProvider, setActiveProxy } from "./provider.js";
 import { startProxy } from "./proxy.js";
+import type { ProxyHandle } from "./proxy.js";
 import { loadConfig } from "./config-loader.js";
 import type { ResolvedConfig } from "./config-types.js";
 import type { OpenClawPluginApi, OpenClawPluginDefinition, PluginLogger } from "./openclaw-types.js";
@@ -26,6 +27,20 @@ export type { ProxyHandle, ProxyOptions } from "./proxy.js";
 export type { RoutingDecision, Tier, RoutingConfig, RouterOptions } from "./router/index.js";
 export type { OpenClawPluginApi, OpenClawPluginDefinition } from "./openclaw-types.js";
 
+// ── Mode Detection ──────────────────────────────────────────────
+
+/** Detect if OpenClaw is running in gateway mode (proxy should start). */
+function isGatewayMode(): boolean {
+  return process.argv.some((a) => a === "gateway" || a === "serve");
+}
+
+/** Detect shell completion mode (skip heavy init to avoid stdout pollution). */
+function isCompletionMode(): boolean {
+  return process.argv.some((arg, i) => arg === "completion" && i >= 1 && i <= 3);
+}
+
+// ── Helpers ─────────────────────────────────────────────────────
+
 /** Fallback logger when running outside OpenClaw (standalone mode). */
 const consoleLogger: PluginLogger = {
   debug: (...args) => console.debug("[local-semantic-router]", ...args),
@@ -33,6 +48,9 @@ const consoleLogger: PluginLogger = {
   warn: (...args) => console.warn("[local-semantic-router]", ...args),
   error: (...args) => console.error("[local-semantic-router]", ...args),
 };
+
+/** Module-level proxy handle for service shutdown. */
+let activeProxyHandle: ProxyHandle | null = null;
 
 /**
  * Wait for proxy health check to pass.
@@ -63,7 +81,34 @@ const plugin: OpenClawPluginDefinition = {
   async register(api: OpenClawPluginApi) {
     const log = api.logger ?? consoleLogger;
 
+    // Always register the provider (needed for model listing, completion, etc.)
     api.registerProvider(localRouterProvider);
+
+    // In completion mode, skip heavy init to avoid stdout pollution
+    if (isCompletionMode()) return;
+
+    // Only start the proxy in gateway mode — prevents blocking CLI commands
+    if (!isGatewayMode()) {
+      log.info("Not in gateway mode — skipping proxy startup");
+      return;
+    }
+
+    // Register service for graceful shutdown (port released on gateway stop)
+    api.registerService({
+      id: "lsr-proxy",
+      start: () => {},
+      stop: async () => {
+        if (activeProxyHandle) {
+          try {
+            await activeProxyHandle.close();
+            log.info("Proxy closed");
+          } catch (err) {
+            log.warn(`Failed to close proxy: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          activeProxyHandle = null;
+        }
+      },
+    });
 
     try {
       const config = loadConfig();
@@ -85,6 +130,7 @@ const plugin: OpenClawPluginDefinition = {
         },
       });
 
+      activeProxyHandle = proxy;
       setActiveProxy(proxy);
 
       const healthy = await waitForProxyHealth(proxy.port);
