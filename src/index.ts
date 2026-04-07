@@ -13,6 +13,7 @@ import { localRouterProvider, setActiveProxy } from "./provider.js";
 import { startProxy } from "./proxy.js";
 import { loadConfig } from "./config-loader.js";
 import type { ResolvedConfig } from "./config-types.js";
+import type { OpenClawPluginApi, OpenClawPluginDefinition, PluginLogger } from "./openclaw-types.js";
 
 // Re-export for library usage
 export { localRouterProvider, setActiveProxy, getActiveProxy } from "./provider.js";
@@ -23,17 +24,15 @@ export { resolveModelAlias, buildModelPricing } from "./models.js";
 export type { ResolvedConfig, LocalRouterConfig, ProviderConfig } from "./config-types.js";
 export type { ProxyHandle, ProxyOptions } from "./proxy.js";
 export type { RoutingDecision, Tier, RoutingConfig, RouterOptions } from "./router/index.js";
+export type { OpenClawPluginApi, OpenClawPluginDefinition } from "./openclaw-types.js";
 
-/**
- * OpenClaw plugin definition interface (minimal).
- */
-interface OpenClawPluginDefinition {
-  id: string;
-  version: string;
-  providers: unknown[];
-  commands?: unknown[];
-  activate?: (api: unknown) => Promise<void>;
-}
+/** Fallback logger when running outside OpenClaw (standalone mode). */
+const consoleLogger: PluginLogger = {
+  debug: (...args) => console.debug("[local-semantic-router]", ...args),
+  info: (...args) => console.log("[local-semantic-router]", ...args),
+  warn: (...args) => console.warn("[local-semantic-router]", ...args),
+  error: (...args) => console.error("[local-semantic-router]", ...args),
+};
 
 /**
  * Wait for proxy health check to pass.
@@ -54,33 +53,35 @@ async function waitForProxyHealth(port: number, timeoutMs = 3000): Promise<boole
 
 /**
  * OpenClaw plugin definition.
- * Auto-starts the proxy when activated.
+ * Auto-starts the proxy when registered in gateway mode.
  */
 const plugin: OpenClawPluginDefinition = {
   id: "local-semantic-router",
   version: "0.1.0",
   providers: [localRouterProvider],
 
-  async activate(_api: unknown) {
+  async register(api: OpenClawPluginApi) {
+    const log = api.logger ?? consoleLogger;
+
+    api.registerProvider(localRouterProvider);
+
     try {
       const config = loadConfig();
 
       const proxy = await startProxy({
         config,
         onReady: (port) => {
-          console.log(
-            `[local-semantic-router] Proxy ready on http://127.0.0.1:${port}`,
-          );
+          log.info(`Proxy ready on http://127.0.0.1:${port}`);
         },
         onRouted: (decision) => {
           const savings = (decision.savings * 100).toFixed(0);
-          console.log(
-            `[local-semantic-router] [${decision.tier}] ${decision.model} ` +
+          log.info(
+            `[${decision.tier}] ${decision.model} ` +
               `$${decision.costEstimate.toFixed(4)} (saved ${savings}%)`,
           );
         },
         onError: (error) => {
-          console.error(`[local-semantic-router] Error: ${error.message}`);
+          log.error(`Error: ${error.message}`);
         },
       });
 
@@ -88,13 +89,11 @@ const plugin: OpenClawPluginDefinition = {
 
       const healthy = await waitForProxyHealth(proxy.port);
       if (!healthy) {
-        console.warn(
-          `[local-semantic-router] Proxy health check did not pass within 3s`,
-        );
+        log.warn(`Proxy health check did not pass within 3s`);
       }
     } catch (error) {
-      console.error(
-        `[local-semantic-router] Failed to start: ${error instanceof Error ? error.message : String(error)}`,
+      log.error(
+        `Failed to start: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   },

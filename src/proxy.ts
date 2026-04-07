@@ -398,7 +398,7 @@ async function tryModelRequest(
   }
 
   try {
-    const response = await dispatchRequest(providerModel, requestBody, config, isStreaming);
+    const response = await dispatchRequest(providerModel, requestBody, config, isStreaming, signal);
 
     if (response.status !== 200) {
       const errorBody = await response.text();

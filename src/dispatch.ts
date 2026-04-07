@@ -48,6 +48,7 @@ export async function dispatchRequest(
   body: Buffer,
   config: ResolvedConfig,
   isStreaming: boolean = false,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const { providerName, modelId } = parseProviderModel(providerModel);
 
@@ -63,9 +64,9 @@ export async function dispatchRequest(
   console.log(`[local-semantic-router] Dispatching to ${providerName}/${modelId}`);
 
   if (provider.api === "anthropic-messages") {
-    return dispatchAnthropic(provider, modelId, body, isStreaming);
+    return dispatchAnthropic(provider, modelId, body, isStreaming, signal);
   } else {
-    return dispatchOpenAI(provider, modelId, body, isStreaming);
+    return dispatchOpenAI(provider, modelId, body, isStreaming, signal);
   }
 }
 
@@ -78,6 +79,7 @@ async function dispatchOpenAI(
   modelId: string,
   body: Buffer,
   isStreaming: boolean,
+  signal?: AbortSignal,
 ): Promise<Response> {
   // Parse and update model in body
   let requestBody: string;
@@ -101,6 +103,7 @@ async function dispatchOpenAI(
       Authorization: `Bearer ${provider.api_key}`,
     },
     body: requestBody,
+    signal,
   });
 }
 
@@ -115,6 +118,7 @@ async function dispatchAnthropic(
   modelId: string,
   body: Buffer,
   isStreaming: boolean,
+  signal?: AbortSignal,
 ): Promise<Response> {
   let requestBody: string;
 
@@ -187,6 +191,7 @@ async function dispatchAnthropic(
       "anthropic-version": "2023-06-01",
     },
     body: requestBody,
+    signal,
   });
 
   // For non-streaming responses, translate tool_use blocks back to OpenAI format
