@@ -330,4 +330,21 @@ describe("translateMessagesToAnthropic", () => {
     expect(content).toHaveLength(1);
     expect(content[0].type).toBe("tool_use");
   });
+
+  it("handles malformed tool call arguments without throwing", () => {
+    const messages = [
+      {
+        role: "assistant",
+        tool_calls: [
+          { id: "t1", type: "function" as const, function: { name: "broken_tool", arguments: "{ broken" } },
+        ],
+      },
+    ];
+    const result = translateMessagesToAnthropic(messages);
+    const content = result[0].content as Array<Record<string, unknown>>;
+    expect(content).toHaveLength(1);
+    expect(content[0].type).toBe("tool_use");
+    expect(content[0].name).toBe("broken_tool");
+    expect(content[0].input).toEqual({});
+  });
 });

@@ -15,7 +15,7 @@ import {
   translateToolCallsFromAnthropic,
   translateMessagesToAnthropic,
 } from "./tools-translator.js";
-import type { OpenAITool, OpenAIToolChoice } from "./tools-translator.js";
+import type { OpenAITool, OpenAIToolChoice, OpenAIToolCall } from "./tools-translator.js";
 
 /**
  * Parse a "provider/model" string into provider name and model ID.
@@ -134,7 +134,7 @@ async function dispatchAnthropic(
 
     // Translate multi-turn messages (tool role, assistant tool_calls)
     const translatedMessages = translateMessagesToAnthropic(
-      nonSystemMessages as Array<{ role: string; content?: unknown; tool_calls?: unknown[]; tool_call_id?: string; [key: string]: unknown }>,
+      nonSystemMessages as Array<{ role: string; content?: unknown; tool_calls?: OpenAIToolCall[]; tool_call_id?: string; [key: string]: unknown }>,
     );
 
     const anthropicBody: Record<string, unknown> = {

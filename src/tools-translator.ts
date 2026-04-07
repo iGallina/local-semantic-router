@@ -55,6 +55,16 @@ export interface OpenAIToolCall {
   };
 }
 
+// ── Helpers ─────────────────────────────────────────────────────
+
+function safeParseJson(json: string | undefined): Record<string, unknown> {
+  try {
+    return JSON.parse(json || "{}");
+  } catch {
+    return {};
+  }
+}
+
 // ── Translation functions ────────────────────────────────────────
 
 /**
@@ -164,7 +174,7 @@ export function translateMessagesToAnthropic(
           type: "tool_use",
           id: tc.id,
           name: tc.function.name,
-          input: JSON.parse(tc.function.arguments || "{}"),
+          input: safeParseJson(tc.function.arguments),
         });
       }
 
