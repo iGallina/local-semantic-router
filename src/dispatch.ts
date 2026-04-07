@@ -16,6 +16,7 @@ import {
   translateMessagesToAnthropic,
 } from "./tools-translator.js";
 import type { OpenAITool, OpenAIToolChoice, OpenAIToolCall } from "./tools-translator.js";
+import { translateAnthropicStream } from "./streaming-translator.js";
 
 /**
  * Parse a "provider/model" string into provider name and model ID.
@@ -197,6 +198,11 @@ async function dispatchAnthropic(
   // For non-streaming responses, translate tool_use blocks back to OpenAI format
   if (!isStreaming && response.ok) {
     return translateAnthropicResponse(response);
+  }
+
+  // For streaming responses, translate Anthropic SSE to OpenAI SSE format
+  if (isStreaming && response.ok) {
+    return translateAnthropicStream(response);
   }
 
   return response;
