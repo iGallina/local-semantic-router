@@ -38,6 +38,8 @@ import { configureRouter } from "./router/index.js";
 import { dispatchRequest, parseProviderModel } from "./dispatch.js";
 import { resolveModelAlias, buildModelPricing } from "./models.js";
 import type { ResolvedConfig } from "./config-types.js";
+import type { SpendControl } from "./spend-control.js";
+import { logUsage } from "./usage-logger.js";
 
 const MAX_MESSAGES = 200;
 const HEARTBEAT_INTERVAL_MS = 2_000;
@@ -364,6 +366,8 @@ export type ProxyOptions = {
   onReady?: (port: number) => void;
   onError?: (error: Error) => void;
   onRouted?: (decision: RoutingDecision) => void;
+  spendControl?: SpendControl;
+  modelPricing?: Map<string, ModelPricing>;
 };
 
 export type ProxyHandle = {
@@ -589,6 +593,23 @@ async function proxyRequest(
     return;
   }
 
+  // Spend limit check (before dispatch)
+  if (options.spendControl) {
+    const estimatedCost = routingDecision?.costEstimate ?? 0;
+    const check = options.spendControl.check(estimatedCost);
+    if (!check.allowed) {
+      res.writeHead(429, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        error: {
+          message: check.reason,
+          type: "spend_limit_exceeded",
+          blocked_by: check.blockedBy,
+        },
+      }));
+      return;
+    }
+  }
+
   // Timeout controller
   const controller = new AbortController();
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -657,9 +678,13 @@ async function proxyRequest(
           `[local-semantic-router] ${routingDecision?.tier ?? "DIRECT"} -> ${attemptModel} (${latencyMs}ms)`,
         );
 
+        // Token usage tracking
+        let inputTokens = 0;
+        let outputTokens = 0;
+
         // Stream the response back
         if (isStreaming) {
-          // Stream SSE from upstream
+          // Stream SSE from upstream, scanning for usage in final chunk
           if (result.response.body) {
             const reader = result.response.body.getReader();
             const decoder = new TextDecoder();
@@ -668,6 +693,21 @@ async function proxyRequest(
                 const { done, value } = await reader.read();
                 if (done) break;
                 const chunk = decoder.decode(value, { stream: true });
+                // Scan for usage data in SSE lines (typically in final chunk)
+                for (const line of chunk.split("\n")) {
+                  if (line.startsWith("data: ") && line !== "data: [DONE]") {
+                    try {
+                      const sseData = JSON.parse(line.slice(6)) as Record<string, unknown>;
+                      const usage = sseData.usage as Record<string, number> | undefined;
+                      if (usage) {
+                        inputTokens = usage.prompt_tokens ?? inputTokens;
+                        outputTokens = usage.completion_tokens ?? outputTokens;
+                      }
+                    } catch {
+                      // partial chunk or non-JSON, skip
+                    }
+                  }
+                }
                 if (!safeWrite(res, chunk)) break;
               }
             } catch {
@@ -687,6 +727,14 @@ async function proxyRequest(
           let finalBody = responseBody;
           try {
             const parsed = JSON.parse(responseBody) as Record<string, unknown>;
+
+            // Extract token usage
+            const usage = parsed.usage as Record<string, number> | undefined;
+            if (usage) {
+              inputTokens = usage.prompt_tokens ?? 0;
+              outputTokens = usage.completion_tokens ?? 0;
+            }
+
             if (parsed.choices && Array.isArray(parsed.choices)) {
               const choices = parsed.choices as Array<Record<string, unknown>>;
               for (const choice of choices) {
@@ -720,6 +768,29 @@ async function proxyRequest(
           });
           res.end(finalBody);
         }
+
+        // Fire-and-forget: log usage and record spend
+        const { providerName } = parseProviderModel(attemptModel);
+        const pricing = options.modelPricing?.get(attemptModel);
+        const actualCost = pricing
+          ? (inputTokens * pricing.inputPrice + outputTokens * pricing.outputPrice) / 1_000_000
+          : 0;
+
+        options.spendControl?.record(actualCost, attemptModel);
+
+        logUsage({
+          timestamp: new Date().toISOString(),
+          model: attemptModel,
+          tier: routingDecision?.tier ?? "DIRECT",
+          provider: providerName,
+          streaming: isStreaming,
+          inputTokens,
+          outputTokens,
+          actualCost,
+          estimatedCost: routingDecision?.costEstimate ?? 0,
+          latencyMs,
+        }).catch(() => {});
+
         return;
       }
 
@@ -832,6 +903,11 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     modelPricing,
   };
 
+  // Make model pricing available for usage cost calculation
+  if (!options.modelPricing) {
+    options.modelPricing = modelPricing;
+  }
+
   // Periodic cleanup of expired rate-limit entries
   const rateLimitCleanup = setInterval(purgeExpiredRateLimits, RATE_LIMIT_CLEANUP_INTERVAL_MS);
 
@@ -864,6 +940,37 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
       const models = buildProxyModelList(config);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ object: "list", data: models }));
+      return;
+    }
+
+    // Stats endpoint
+    if (req.url === "/v1/stats" && req.method === "GET") {
+      const { readUsageLogs } = await import("./usage-logger.js");
+      const entries = await readUsageLogs(7);
+      const spending = options.spendControl?.getStatus() ?? null;
+
+      // Aggregate by day and model
+      const byDay: Record<string, { cost: number; requests: number }> = {};
+      const byModel: Record<string, { cost: number; requests: number; inputTokens: number; outputTokens: number }> = {};
+      let totalCost = 0;
+
+      for (const e of entries) {
+        const day = e.timestamp.slice(0, 10);
+        if (!byDay[day]) byDay[day] = { cost: 0, requests: 0 };
+        byDay[day].cost += e.actualCost;
+        byDay[day].requests++;
+
+        if (!byModel[e.model]) byModel[e.model] = { cost: 0, requests: 0, inputTokens: 0, outputTokens: 0 };
+        byModel[e.model].cost += e.actualCost;
+        byModel[e.model].requests++;
+        byModel[e.model].inputTokens += e.inputTokens;
+        byModel[e.model].outputTokens += e.outputTokens;
+
+        totalCost += e.actualCost;
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ totalCost, totalRequests: entries.length, byDay, byModel, spending }, null, 2));
       return;
     }
 

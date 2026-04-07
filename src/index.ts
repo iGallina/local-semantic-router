@@ -15,7 +15,10 @@ import type { ProxyHandle } from "./proxy.js";
 import { loadConfig } from "./config-loader.js";
 import type { ResolvedConfig } from "./config-types.js";
 import type { OpenClawPluginApi, OpenClawPluginDefinition, PluginLogger } from "./openclaw-types.js";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { injectModelsConfig, injectAuthProfile } from "./openclaw-config.js";
+import { SpendControl } from "./spend-control.js";
 
 // Re-export for library usage
 export { localRouterProvider, setActiveProxy, getActiveProxy } from "./provider.js";
@@ -114,8 +117,23 @@ const plugin: OpenClawPluginDefinition = {
     try {
       const config = loadConfig();
 
+      // Initialize spend control if budget limits are configured
+      const dataDir = join(homedir(), ".local-semantic-router");
+      const spendControl = config.budget
+        ? new SpendControl(config.budget, dataDir)
+        : undefined;
+
+      if (spendControl) {
+        const status = spendControl.getStatus();
+        log.info(
+          `Budget limits active — per-request: $${status.limits.perRequest ?? "∞"}, ` +
+            `hourly: $${status.limits.hourly ?? "∞"}, daily: $${status.limits.daily ?? "∞"}`,
+        );
+      }
+
       const proxy = await startProxy({
         config,
+        spendControl,
         onReady: (port) => {
           log.info(`Proxy ready on http://127.0.0.1:${port}`);
         },

@@ -57,6 +57,12 @@ export interface ScoringOverrides {
   confidence_threshold?: number;
 }
 
+export interface BudgetConfig {
+  per_request?: number; // max USD per single request
+  hourly?: number; // rolling 1-hour window USD
+  daily?: number; // rolling 24-hour window USD
+}
+
 export interface LocalRouterConfig {
   port?: number; // default 8402
   bind?: string; // default "127.0.0.1" (SEC-2)
@@ -65,6 +71,7 @@ export interface LocalRouterConfig {
   tiers: TierMappingConfig;
   fallback_classifier?: FallbackClassifierConfig;
   scoring?: ScoringOverrides;
+  budget?: BudgetConfig;
 }
 
 /**
