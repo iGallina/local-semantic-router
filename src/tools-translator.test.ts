@@ -80,6 +80,46 @@ describe("translateToolsToAnthropic", () => {
     expect(output[0].name).toBe("no_desc");
     expect(output[0].description).toBeUndefined();
   });
+
+  it("ensures type: object when parameters omit it", () => {
+    const input = [
+      {
+        type: "function" as const,
+        function: {
+          name: "read",
+          description: "Read a file",
+          parameters: {
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+        },
+      },
+    ];
+    const output = translateToolsToAnthropic(input);
+    expect(output[0].input_schema).toEqual({
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    });
+  });
+
+  it("provides default input_schema when parameters is undefined", () => {
+    const input = [
+      {
+        type: "function" as const,
+        function: {
+          name: "no_params",
+          description: "A tool with no parameters",
+        },
+      },
+    ];
+    const output = translateToolsToAnthropic(input);
+    expect(output[0].input_schema).toEqual({
+      type: "object",
+      properties: {},
+      required: [],
+    });
+  });
 });
 
 describe("translateToolChoiceToAnthropic", () => {

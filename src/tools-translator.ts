@@ -62,10 +62,17 @@ export interface OpenAIToolCall {
  */
 export function translateToolsToAnthropic(tools: OpenAITool[]): AnthropicTool[] {
   return tools.map((t) => {
+    // Anthropic requires input_schema to be a valid JSON Schema with type: "object".
+    // OpenAI parameters may omit "type" or be undefined entirely.
+    const params = t.function.parameters;
+    const inputSchema: Record<string, unknown> = params && typeof params === "object"
+      ? { type: "object", ...params }
+      : { type: "object", properties: {}, required: [] };
+
     const result: AnthropicTool = {
       type: "custom",
       name: t.function.name,
-      input_schema: t.function.parameters,
+      input_schema: inputSchema,
     };
     if (t.function.description !== undefined) {
       result.description = t.function.description;
