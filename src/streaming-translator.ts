@@ -124,6 +124,10 @@ interface TranslatorState {
   inputTokens: number;
   /** Tracks which tool-block indices have already had their id/type/name emitted. */
   toolBlockStarted: Set<number>;
+  /** Maps Anthropic content-block index → 0-based OpenAI tool_calls index. */
+  toolIndexMap: Map<number, number>;
+  /** Next sequential tool call index to assign. */
+  nextToolIndex: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -208,8 +212,11 @@ function translateEvent(
       if (e.content_block.type === "tool_use") {
         const block = e.content_block;
         state.toolBlockStarted.add(e.index);
+        // Assign a sequential 0-based tool index for the OpenAI tool_calls array
+        const toolIdx = state.nextToolIndex++;
+        state.toolIndexMap.set(e.index, toolIdx);
         const toolDelta: OpenAIToolCallDelta = {
-          index: e.index,
+          index: toolIdx,
           id: block.id,
           type: "function",
           function: { name: block.name, arguments: "" },
@@ -226,8 +233,9 @@ function translateEvent(
         return [buildChunk(state, { content: e.delta.text })];
       }
       if (e.delta.type === "input_json_delta") {
+        const toolIdx = state.toolIndexMap.get(e.index) ?? e.index;
         const toolDelta: OpenAIToolCallDelta = {
-          index: e.index,
+          index: toolIdx,
           function: { arguments: e.delta.partial_json },
         };
         return [buildChunk(state, { tool_calls: [toolDelta] })];
@@ -284,6 +292,8 @@ export function translateAnthropicStream(response: Response): Response {
     created: Math.floor(Date.now() / 1000),
     inputTokens: 0,
     toolBlockStarted: new Set(),
+    toolIndexMap: new Map(),
+    nextToolIndex: 0,
   };
 
   const decoder = new TextDecoder();

@@ -159,9 +159,10 @@ describe("injectModelsConfig", () => {
     expect(provider.models.some((m) => m.id === "lsr-old")).toBe(false);
   });
 
-  it("backs up corrupt JSON file and writes fresh config", () => {
+  it("backs up corrupt JSON file and returns early without writing", () => {
     const configPath = join(openClawDir, "openclaw.json");
-    writeFileSync(configPath, "{ this is not valid json }", "utf-8");
+    const corruptContent = "{ this is not valid json }";
+    writeFileSync(configPath, corruptContent, "utf-8");
 
     const warnMessages: string[] = [];
     const logger: PluginLogger = {
@@ -173,10 +174,12 @@ describe("injectModelsConfig", () => {
 
     // Backup created
     expect(warnMessages.some((m) => m.includes("backup"))).toBe(true);
+    // Skipping message logged
+    expect(warnMessages.some((m) => m.includes("Skipping"))).toBe(true);
 
-    // Fresh config written with LSR provider
-    const config = readJson<{ models: { providers: Record<string, unknown> } }>(configPath);
-    expect(config.models.providers["local-router"]).toBeDefined();
+    // Original file NOT overwritten — corrupt content remains
+    const afterContent = readFileSync(configPath, "utf-8");
+    expect(afterContent).toBe(corruptContent);
   });
 
   it("is idempotent — calling twice does not duplicate entries", () => {
@@ -192,6 +195,26 @@ describe("injectModelsConfig", () => {
     expect(Object.keys(config.models.providers)).toHaveLength(1);
     const modelKeys = Object.keys(config.agents.defaults.models);
     expect(modelKeys.filter((k) => k.startsWith("local-router/"))).toHaveLength(3);
+  });
+
+  it("does not write when provider config is already correct", () => {
+    // First call creates the config
+    injectModelsConfig(8402, silentLogger, openClawDir);
+
+    const configPath = join(openClawDir, "openclaw.json");
+    const mtimeBefore = statSync(configPath).mtimeMs;
+
+    // Second call should skip writing (everything already correct)
+    const debugMessages: string[] = [];
+    const logger: PluginLogger = {
+      ...silentLogger,
+      debug: (...args) => debugMessages.push(args.map(String).join(" ")),
+    };
+    injectModelsConfig(8402, logger, openClawDir);
+
+    const mtimeAfter = statSync(configPath).mtimeMs;
+    expect(mtimeAfter).toBe(mtimeBefore);
+    expect(debugMessages.some((m) => m.includes("already up to date"))).toBe(true);
   });
 
   it("does not set agents.defaults.model.primary", () => {

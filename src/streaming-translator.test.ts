@@ -309,14 +309,68 @@ describe("translateAnthropicStream", () => {
     });
     expect(hasText).toBe(true);
 
-    // Verify tool call appears with index 1
+    // Verify tool call appears with 0-based tool index (not Anthropic content block index)
     const hasToolCall = parsed.some((c) => {
       const choices = c.choices as Array<Record<string, unknown>>;
       const delta = choices[0].delta as Record<string, unknown>;
       const toolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
-      return toolCalls?.[0]?.index === 1;
+      return toolCalls?.[0]?.index === 0;
     });
     expect(hasToolCall).toBe(true);
+  });
+
+  it("mixed content with multiple tools: tool indices are 0-based regardless of content block position", async () => {
+    const sse = makeAnthropicSSE([
+      messageStartEvent("msg_004", "claude-test"),
+      textBlockStartEvent(0),
+      textDeltaEvent(0, "I'll read those files."),
+      contentBlockStopEvent(0),
+      toolBlockStartEvent(1, "toolu_001", "read"),
+      inputJsonDeltaEvent(1, '{"path": "/a.ts"}'),
+      contentBlockStopEvent(1),
+      toolBlockStartEvent(2, "toolu_002", "read"),
+      inputJsonDeltaEvent(2, '{"path": "/b.ts"}'),
+      contentBlockStopEvent(2),
+      messageDeltaEvent("tool_use", 25),
+      messageStopEvent(),
+    ]);
+
+    const translated = translateAnthropicStream(buildMockResponse(sse));
+    const allLines = await collectDataLines(translated);
+    const parsed = allLines
+      .filter((l) => l !== "[DONE]")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+
+    // Collect all tool call start chunks (those with an id)
+    const toolStarts = parsed
+      .map((c) => {
+        const choices = c.choices as Array<Record<string, unknown>>;
+        const delta = choices[0].delta as Record<string, unknown>;
+        const toolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
+        if (!toolCalls || !toolCalls[0]?.id) return null;
+        return { index: toolCalls[0].index, id: toolCalls[0].id };
+      })
+      .filter(Boolean);
+
+    // First tool should be index 0, second should be index 1
+    expect(toolStarts[0]).toEqual({ index: 0, id: "toolu_001" });
+    expect(toolStarts[1]).toEqual({ index: 1, id: "toolu_002" });
+
+    // Verify argument deltas also use correct indices
+    const argDeltas = parsed
+      .map((c) => {
+        const choices = c.choices as Array<Record<string, unknown>>;
+        const delta = choices[0].delta as Record<string, unknown>;
+        const toolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
+        if (!toolCalls || toolCalls[0]?.id) return null; // skip start chunks
+        const fn = toolCalls[0]?.function as Record<string, unknown> | undefined;
+        if (!fn?.arguments || (fn.arguments as string).length === 0) return null;
+        return { index: toolCalls[0].index, args: fn.arguments };
+      })
+      .filter(Boolean);
+
+    expect(argDeltas[0]).toEqual({ index: 0, args: '{"path": "/a.ts"}' });
+    expect(argDeltas[1]).toEqual({ index: 1, args: '{"path": "/b.ts"}' });
   });
 
   it("stop reason mapping: end_turn → stop", async () => {

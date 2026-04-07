@@ -16,7 +16,6 @@ import {
   writeFileSync,
   renameSync,
   readdirSync,
-  statSync,
   copyFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -180,50 +179,94 @@ export function injectModelsConfig(port: number, logger: PluginLogger, _openClaw
 
   // Read existing config, handling corrupt JSON
   let config: OpenClawConfig;
+  let needsWrite = false;
   const parsed = readJsonFile<OpenClawConfig>(configPath);
 
   if (parsed === null) {
     // File does not exist — start fresh
     config = {};
+    needsWrite = true;
   } else if (parsed === undefined) {
-    // File exists but contains invalid JSON — back up and start fresh
+    // File exists but contains invalid JSON — back up and skip writing.
+    // Don't write — we'd lose other plugins' config.
     backupFile(configPath, logger);
-    config = {};
+    logger.warn("Skipping config injection due to corrupt openclaw.json");
+    return;
   } else {
     config = parsed;
   }
 
   // ── Inject provider ──────────────────────────────────────────
 
-  if (!config.models) config.models = {};
-  if (!config.models.providers) config.models.providers = {};
+  if (!config.models) { config.models = {}; needsWrite = true; }
+  if (!config.models.providers) { config.models.providers = {}; needsWrite = true; }
 
-  const providerEntry: OpenClawProviderEntry = {
-    baseUrl: `http://127.0.0.1:${port}/v1`,
-    api: "openai-completions",
-    apiKey: "lsr-proxy-handles-auth",
-    models: LSR_MODELS,
-  };
+  const expectedBaseUrl = `http://127.0.0.1:${port}/v1`;
 
-  config.models.providers[LSR_PROVIDER_ID] = providerEntry;
+  if (!config.models.providers[LSR_PROVIDER_ID]) {
+    // First install: create provider entry
+    config.models.providers[LSR_PROVIDER_ID] = {
+      baseUrl: expectedBaseUrl,
+      api: "openai-completions",
+      apiKey: "lsr-proxy-handles-auth",
+      models: LSR_MODELS,
+    };
+    needsWrite = true;
+  } else {
+    // Validate and fix individual fields on existing provider
+    const existing = config.models.providers[LSR_PROVIDER_ID];
 
-  // ── Inject model allowlist ───────────────────────────────────
+    if (existing.baseUrl !== expectedBaseUrl) {
+      existing.baseUrl = expectedBaseUrl;
+      needsWrite = true;
+    }
+    if (!existing.api) {
+      existing.api = "openai-completions";
+      needsWrite = true;
+    }
+    if (!existing.apiKey) {
+      existing.apiKey = "lsr-proxy-handles-auth";
+      needsWrite = true;
+    }
 
-  if (!config.agents) config.agents = {};
-  if (!config.agents.defaults) config.agents.defaults = {};
-  if (!config.agents.defaults.models) config.agents.defaults.models = {};
+    // Smart model list comparison by ID set
+    const currentModelIds = new Set(
+      Array.isArray(existing.models) ? existing.models.map((m) => m.id) : [],
+    );
+    const expectedModelIds = LSR_MODELS.map((m) => m.id);
+    const needsModelUpdate =
+      !existing.models ||
+      !Array.isArray(existing.models) ||
+      existing.models.length !== LSR_MODELS.length ||
+      expectedModelIds.some((id) => !currentModelIds.has(id));
 
-  for (const key of LSR_ALLOWLIST_KEYS) {
-    // Only add if not already present (preserves existing non-LSR entries too)
-    if (!(key in config.agents.defaults.models)) {
-      config.agents.defaults.models[key] = {};
+    if (needsModelUpdate) {
+      existing.models = LSR_MODELS;
+      needsWrite = true;
     }
   }
 
-  // ── Atomic write ─────────────────────────────────────────────
+  // ── Inject model allowlist ───────────────────────────────────
 
-  writeJsonAtomic(configPath, config);
-  logger.info(`Injected LSR provider into ${configPath} (port ${port})`);
+  if (!config.agents) { config.agents = {}; needsWrite = true; }
+  if (!config.agents.defaults) { config.agents.defaults = {}; needsWrite = true; }
+  if (!config.agents.defaults.models) { config.agents.defaults.models = {}; needsWrite = true; }
+
+  for (const key of LSR_ALLOWLIST_KEYS) {
+    if (!(key in config.agents.defaults.models)) {
+      config.agents.defaults.models[key] = {};
+      needsWrite = true;
+    }
+  }
+
+  // ── Atomic write (only when dirty) ──────────────────────────
+
+  if (needsWrite) {
+    writeJsonAtomic(configPath, config);
+    logger.info(`Injected LSR provider into ${configPath} (port ${port})`);
+  } else {
+    logger.debug?.(`LSR config already up to date in ${configPath}`);
+  }
 }
 
 // ── injectAuthProfile ─────────────────────────────────────────────
@@ -259,15 +302,10 @@ export function injectAuthProfile(logger: PluginLogger, _openClawDir?: string): 
 
   // Scan for existing agent directories
   try {
-    const entries = readdirSync(agentsDir);
+    const entries = readdirSync(agentsDir, { withFileTypes: true });
     for (const entry of entries) {
-      const fullPath = join(agentsDir, entry);
-      try {
-        if (statSync(fullPath).isDirectory()) {
-          agentDirs.add(entry);
-        }
-      } catch {
-        // Skip entries we can't stat
+      if (entry.isDirectory()) {
+        agentDirs.add(entry.name);
       }
     }
   } catch (err) {
@@ -317,7 +355,7 @@ export function injectAuthProfile(logger: PluginLogger, _openClawDir?: string): 
         provider: "local-router",
         key: "lsr-proxy-handles-auth",
       };
-      writeJsonAtomic(authProfilesPath, profilesFile);
+      writeFileSync(authProfilesPath, JSON.stringify(profilesFile, null, 2), "utf-8");
       logger.info(`Injected LSR auth profile into agent "${agentName}"`);
     } else {
       logger.debug?.(`LSR auth profile already present in agent "${agentName}", skipping`);
